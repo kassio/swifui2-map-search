@@ -4,7 +4,8 @@ import MapKit
 
 class LocationManager: NSObject, ObservableObject {
     private let locationManager =  CLLocationManager()
-    @Published var location: CLLocation? = nil
+
+    @Published var region = MKCoordinateRegion()
 
     override init() {
         super.init()
@@ -23,73 +24,51 @@ extension LocationManager: CLLocationManagerDelegate {
     }
 
     func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
-        guard let location = locations.last else { return }
-
-        self.location = location
-    }
-}
-
-class Coordinator: NSObject, MKMapViewDelegate {
-    var control: MapView
-
-    init(_ control: MapView) {
-        self.control = control
-    }
-
-    func mapView(_ mapView: MKMapView, didAdd views: [MKAnnotationView]) {
-        guard let annotationView = views.first else { return }
-        guard let annotation = annotationView.annotation else { return }
-
-        if annotation is MKUserLocation {
-            let region = MKCoordinateRegion(
-                center: annotation.coordinate,
-                latitudinalMeters: 1000,
-                longitudinalMeters: 1000
-            )
-
-            mapView.setRegion(region, animated: true)
+        self.locationManager.stopUpdatingLocation()
+        locations.last.map {
+            let center = CLLocationCoordinate2D(latitude: $0.coordinate.latitude, longitude: $0.coordinate.longitude)
+            let span = MKCoordinateSpan(latitudeDelta: 0.5, longitudeDelta: 0.5)
+            region = MKCoordinateRegion(center: center, span: span)
         }
     }
 }
 
-struct MapView: UIViewRepresentable {
-    let landmarks: [Landmark]
+struct LandmarkInfoView: View {
+    var landmark: Landmark
 
-    func makeUIView(context: Context) -> MKMapView {
-        let map = MKMapView()
-        map.showsUserLocation = true
-        map.delegate = context.coordinator
-
-        return map
-    }
-
-    func makeCoordinator() -> Coordinator {
-        return Coordinator(self)
-    }
-
-    func updateUIView(_ mapView: MKMapView, context: UIViewRepresentableContext<MapView>) {
-        mapView.removeAnnotations(mapView.annotations)
-
-        mapView.addAnnotations(landmarks.map(LandmarkAnnotation.init))
+    var body: some View {
+        RoundedRectangle(cornerRadius: /*@START_MENU_TOKEN@*/25.0/*@END_MENU_TOKEN@*/)
+            .padding()
+            .frame(height: 200)
+            .background(Color.clear)
+            .foregroundColor(Color(.systemBackground))
+            .overlay(
+                VStack {
+                    Text(landmark.name)
+                        .font(.title2)
+                    Text(landmark.country)
+                        .font(.body)
+                    Text("\(landmark.latitude) - \(landmark.longitude)")
+                        .font(.caption)
+                        .padding(.bottom, 10)
+                    Text(landmark.locality)
+                        .font(.caption2)
+                    Text(landmark.subLocality)
+                        .font(.caption2)
+                }
+            )
     }
 }
 
-struct Landmark {
-    let placemark: MKPlacemark
+extension View {
+    func showDetails(landmark: Landmark?) -> some View {
+        ZStack(alignment: .bottom) {
+            self
 
-    var id: UUID = UUID()
-    var name: String { placemark.name ?? "" }
-    var title: String { placemark.title ?? "" }
-    var coordinate: CLLocationCoordinate2D { placemark.coordinate }
-}
-
-final class LandmarkAnnotation: NSObject, MKAnnotation {
-    let title: String?
-    let coordinate: CLLocationCoordinate2D
-
-    init(landmark: Landmark) {
-        self.title = landmark.title
-        self.coordinate = landmark.coordinate
+            if let landmark = landmark {
+                LandmarkInfoView(landmark: landmark)
+            }
+        }
     }
 }
 
@@ -98,15 +77,35 @@ struct ContentView: View {
     @State private var landmarks: [Landmark] = []
     @ObservedObject private var locationManager = LocationManager()
 
-    var body: some View {
-        ZStack {
-            MapView(landmarks: landmarks)
+    @State private var landmarkShow: Landmark?
 
-            TextField("query", text: $query, onCommit: {
-                getLandmarks()
-            })
-            .textFieldStyle(RoundedBorderTextFieldStyle())
-            .padding()
+    var body: some View {
+        VStack {
+            ZStack(alignment: .topLeading) {
+                Map(
+                    coordinateRegion: $locationManager.region,
+                    interactionModes: .all,
+                    showsUserLocation: true,
+                    annotationItems: landmarks,
+                    annotationContent: { landmark in
+                        MapAnnotation(coordinate: landmark.coordinate) {
+                            Image(systemName: "mappin.circle.fill")
+                                .foregroundColor(.blue)
+                                .font(.title)
+                                .onTapGesture {
+                                    landmarkShow = landmark
+                                }
+                        }
+                    }
+                )
+
+                TextField("query", text: $query, onCommit: {
+                    getLandmarks()
+                })
+                .textFieldStyle(RoundedBorderTextFieldStyle())
+                .padding()
+            }
+            .showDetails(landmark: landmarkShow)
         }
     }
 
@@ -125,8 +124,31 @@ struct ContentView: View {
     }
 }
 
+struct Landmark: Identifiable {
+    let placemark: MKPlacemark
+
+    var id: UUID = UUID()
+    var name: String { placemark.name ?? "" }
+    var country: String { placemark.country ?? "" }
+    var postalCode: String { placemark.postalCode ?? "" }
+    var locality: String { placemark.locality ?? "" }
+    var subLocality: String { placemark.subLocality ?? "" }
+    var latitude: Double { placemark.coordinate.latitude }
+    var longitude: Double { placemark.coordinate.longitude }
+
+    var coordinate: CLLocationCoordinate2D { placemark.coordinate }
+}
+
 struct ContentView_Previews: PreviewProvider {
     static var previews: some View {
-        ContentView().environment(\.managedObjectContext, PersistenceController.preview.container.viewContext)
+        let place = MKPlacemark(coordinate: CLLocationCoordinate2D(
+            latitude: 53.604526,
+            longitude: -6.189235
+        ))
+
+        Group {
+            ContentView()
+            LandmarkInfoView(landmark: Landmark(placemark: place))
+        }
     }
 }
