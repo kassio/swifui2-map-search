@@ -27,60 +27,76 @@ extension LocationManager: CLLocationManagerDelegate {
         self.locationManager.stopUpdatingLocation()
         locations.last.map {
             let center = CLLocationCoordinate2D(latitude: $0.coordinate.latitude, longitude: $0.coordinate.longitude)
-            let span = MKCoordinateSpan(latitudeDelta: 0.5, longitudeDelta: 0.5)
+            let span = MKCoordinateSpan(latitudeDelta: 0.2, longitudeDelta: 0.2)
             region = MKCoordinateRegion(center: center, span: span)
         }
     }
 }
 
 struct LandmarkInfoView: View {
-    var landmark: Landmark
+    @Binding var landmark: Landmark
+    var closeAction: () -> Void
 
     var body: some View {
-        RoundedRectangle(cornerRadius: /*@START_MENU_TOKEN@*/25.0/*@END_MENU_TOKEN@*/)
-            .padding()
-            .frame(height: 200)
-            .background(Color.clear)
-            .foregroundColor(Color(.systemBackground))
-            .overlay(
-                VStack {
-                    Text(landmark.name)
-                        .font(.title2)
-                    Text(landmark.country)
-                        .font(.body)
-                    Text("\(landmark.latitude) - \(landmark.longitude)")
-                        .font(.caption)
-                        .padding(.bottom, 10)
-                    Text(landmark.locality)
-                        .font(.caption2)
-                    Text(landmark.subLocality)
-                        .font(.caption2)
-                }
-            )
+        VStack {
+            VStack {
+                Text(landmark.name).font(.title2).padding(.bottom, 8)
+                Text(landmark.locality).font(.body)
+                Text(landmark.subLocality).font(.caption)
+                Text(landmark.country).font(.caption2)
+            }
+            .padding(.bottom)
+            VStack {
+                Text("(\(landmark.latitude), \(landmark.longitude))")
+                    .font(.caption)
+            }
+            .padding(.bottom)
+
+            Button("close", action: closeAction)
+        }
+        .padding()
+        .frame(width: UIScreen.main.bounds.width - 30)
+        .background(Color(.systemBackground))
+        .cornerRadius(15)
     }
 }
 
-extension View {
-    func showDetails(landmark: Landmark?) -> some View {
-        ZStack(alignment: .bottom) {
-            self
+struct MapViewDetails<Content: View>: View {
+    @Binding var landmark: Landmark?
+    let content: Content
 
-            if let landmark = landmark {
-                LandmarkInfoView(landmark: landmark)
+    private var unwrappedLandmark: Binding<Landmark> {
+        Binding(
+            get: { landmark! },
+            set: { landmark = $0 }
+        )
+    }
+
+    init(_ landmark: Binding<Landmark?>, @ViewBuilder content: () -> Content) {
+        self._landmark = landmark
+        self.content = content()
+    }
+
+    var body: some View {
+        ZStack(alignment: .bottom) {
+            content
+            if landmark != nil {
+                LandmarkInfoView(landmark: unwrappedLandmark) {
+                    landmark = nil
+                }
             }
         }
     }
 }
 
 struct ContentView: View {
-    @State private var query: String = ""
-    @State private var landmarks: [Landmark] = []
     @ObservedObject private var locationManager = LocationManager()
-
-    @State private var landmarkShow: Landmark?
+    @State private var landmarks: [Landmark] = []
+    @State private var isPresentingLandmark: Landmark?
+    @State private var query: String = ""
 
     var body: some View {
-        VStack {
+        MapViewDetails($isPresentingLandmark) {
             ZStack(alignment: .topLeading) {
                 Map(
                     coordinateRegion: $locationManager.region,
@@ -90,22 +106,20 @@ struct ContentView: View {
                     annotationContent: { landmark in
                         MapAnnotation(coordinate: landmark.coordinate) {
                             Image(systemName: "mappin.circle.fill")
-                                .foregroundColor(.blue)
                                 .font(.title)
-                                .onTapGesture {
-                                    landmarkShow = landmark
-                                }
+                                .foregroundColor(.blue)
+                                .background(Color(.systemBackground).clipShape(Circle()))
+                                .onTapGesture  { isPresentingLandmark = landmark }
                         }
                     }
                 )
 
-                TextField("query", text: $query, onCommit: {
-                    getLandmarks()
-                })
-                .textFieldStyle(RoundedBorderTextFieldStyle())
-                .padding()
+                TextField("query", text: $query, onCommit: getLandmarks)
+                    .textFieldStyle(RoundedBorderTextFieldStyle())
+                    .padding(.top, 60)
+                    .padding(.horizontal)
             }
-            .showDetails(landmark: landmarkShow)
+            .edgesIgnoringSafeArea(.all)
         }
     }
 
@@ -141,14 +155,6 @@ struct Landmark: Identifiable {
 
 struct ContentView_Previews: PreviewProvider {
     static var previews: some View {
-        let place = MKPlacemark(coordinate: CLLocationCoordinate2D(
-            latitude: 53.604526,
-            longitude: -6.189235
-        ))
-
-        Group {
-            ContentView()
-            LandmarkInfoView(landmark: Landmark(placemark: place))
-        }
+        ContentView()
     }
 }
